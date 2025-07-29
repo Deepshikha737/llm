@@ -1,0 +1,44 @@
+# Core Dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+pydantic==2.5.0
+
+# Document Processing
+PyPDF2==3.0.1
+python-docx==1.1.0
+python-pptx==0.6.23
+email-reply-parser==0.5.12
+
+# Vector Search & Embeddings
+faiss-cpu==1.7.4
+sentence-transformers==2.2.2
+numpy==1.24.3
+
+# LLM Integration
+transformers==4.36.0
+torch==2.1.0
+accelerate==0.25.0
+huggingface-hub==0.19.4
+
+# Text Processing
+nltk==3.8.1
+spacy==3.7.2
+langchain==0.0.350
+langchain-community==0.0.38
+
+# Utilities
+python-dotenv==1.0.0
+tqdm==4.66.1
+typing-extensions==4.8.0
+jinja2==3.1.2
+
+# Web Interface
+streamlit==1.28.2
+plotly==5.17.0
+pandas==2.1.4
+
+# Development
+pytest==7.4.3
+black==23.11.0
+flake8==6.1.0
