@@ -4,6 +4,7 @@ import logging
 from document_processors import PDFProcessor, DOCXProcessor, EmailProcessor
 from embedding_system.vector_store import VectorStore
 from llm_system.query_processor import QueryProcessor
+from llm_system.huggingface_llm import HuggingFaceLLM
 import config
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ class DocumentManager:
         
         # Initialize query processor
         self.query_processor = QueryProcessor()
+        
+        # Initialize LLM for answer generation
+        self.llm = HuggingFaceLLM()
         
         # Load existing vector store if available
         self._load_vector_store()
@@ -177,8 +181,8 @@ class DocumentManager:
         except Exception as e:
             logger.error(f"Error saving vector store: {e}")
     
-    def search(self, query: str, k: int = 5) -> Dict[str, Any]:
-        """Search for relevant documents"""
+    def search(self, query: str, k: int = 5, generate_answer: bool = True) -> Dict[str, Any]:
+        """Search for relevant documents and optionally generate answers"""
         try:
             # Process the query
             processed_query = self.query_processor.process_query(query)
@@ -195,6 +199,8 @@ class DocumentManager:
             
             # Format results
             formatted_results = []
+            context_for_llm = []
+            
             for result in results:
                 formatted_result = {
                     "text": result["text"],
@@ -207,14 +213,46 @@ class DocumentManager:
                     }
                 }
                 formatted_results.append(formatted_result)
+                context_for_llm.append(result["text"])
             
-            return {
+            response = {
                 "success": True,
                 "query": query,
                 "processed_query": processed_query,
                 "results": formatted_results,
                 "total_results": len(formatted_results)
             }
+            
+            # Generate LLM answer if requested and results found
+            if generate_answer and formatted_results:
+                try:
+                    # Combine context from top results
+                    combined_context = "\n\n".join(context_for_llm[:3])  # Use top 3 results
+                    
+                    # Generate answer using LLM
+                    llm_answer = self.llm.query_huggingface_llm(combined_context, query)
+                    
+                    # Add LLM response to results
+                    response["llm_answer"] = {
+                        "answer": llm_answer,
+                        "confidence": self._calculate_answer_confidence(llm_answer, formatted_results),
+                        "sources_used": len(context_for_llm[:3])
+                    }
+                    
+                    # Add explanation/rationale
+                    response["explanation"] = self._generate_explanation(
+                        query, processed_query, formatted_results, llm_answer
+                    )
+                    
+                except Exception as e:
+                    logger.warning(f"LLM answer generation failed: {e}")
+                    response["llm_answer"] = {
+                        "answer": f"Unable to generate answer: {str(e)}",
+                        "confidence": 0.0,
+                        "sources_used": 0
+                    }
+            
+            return response
         
         except Exception as e:
             logger.error(f"Error searching: {e}")
@@ -224,6 +262,59 @@ class DocumentManager:
                 "query": query,
                 "results": []
             }
+    
+    def _calculate_answer_confidence(self, llm_answer: str, search_results: List[Dict]) -> float:
+        """Calculate confidence score for the generated answer"""
+        if llm_answer.startswith("LLM error") or not llm_answer.strip():
+            return 0.0
+        
+        if not search_results:
+            return 0.1
+        
+        # Base confidence on search result similarity scores
+        avg_similarity = sum(r["similarity_score"] for r in search_results) / len(search_results)
+        
+        # Adjust based on answer quality indicators
+        quality_score = 1.0
+        
+        # Penalize very short answers
+        if len(llm_answer.strip()) < 20:
+            quality_score *= 0.5
+        
+        # Penalize obvious error responses
+        error_indicators = ["i don't know", "cannot determine", "unclear", "insufficient information"]
+        if any(indicator in llm_answer.lower() for indicator in error_indicators):
+            quality_score *= 0.3
+        
+        # Boost for specific, detailed answers
+        if len(llm_answer.strip()) > 100 and any(word in llm_answer.lower() for word in ["yes", "no", "covered", "required", "included"]):
+            quality_score *= 1.2
+        
+        confidence = min(avg_similarity * quality_score, 1.0)
+        return round(confidence, 3)
+    
+    def _generate_explanation(self, original_query: str, processed_query: Dict, 
+                            search_results: List[Dict], llm_answer: str) -> Dict[str, Any]:
+        """Generate explanation of the decision process"""
+        return {
+            "reasoning_process": [
+                f"1. Analyzed query intent: '{processed_query['intent']}'",
+                f"2. Detected domain: '{processed_query['domain']}'", 
+                f"3. Found {len(search_results)} relevant document sections",
+                f"4. Generated answer using top {min(3, len(search_results))} most similar sections"
+            ],
+            "key_factors": {
+                "domain": processed_query["domain"],
+                "intent": processed_query["intent"],
+                "entities_found": [e["text"] for e in processed_query["entities"]],
+                "top_similarity_score": search_results[0]["similarity_score"] if search_results else 0,
+                "sources_consulted": len(search_results)
+            },
+            "decision_basis": [
+                f"Source: {r['source']['file_name']} (Score: {r['similarity_score']:.3f})"
+                for r in search_results[:3]
+            ]
+        }
     
     def get_stats(self) -> Dict[str, Any]:
         """Get system statistics"""

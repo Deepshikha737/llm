@@ -129,8 +129,8 @@ async def hackrx_run(
     try:
         logger.info(f"Processing query: {request.query}")
         
-        # Search for relevant documents
-        result = dm.search(request.query, k=request.k)
+        # Search for relevant documents with optional LLM answer generation
+        result = dm.search(request.query, k=request.k, generate_answer=request.generate_answer)
         
         if not result["success"]:
             raise HTTPException(status_code=500, detail=result.get("error", "Search failed"))
@@ -139,6 +139,9 @@ async def hackrx_run(
         search_response = SearchResponse(**result)
         
         logger.info(f"Query processed successfully. Found {len(search_response.results)} results")
+        if search_response.llm_answer:
+            logger.info(f"LLM answer generated with confidence: {search_response.llm_answer.confidence}")
+        
         return search_response
         
     except HTTPException:
@@ -151,10 +154,11 @@ async def hackrx_run(
 async def search_documents(
     query: str,
     k: int = 5,
+    generate_answer: bool = True,
     dm: DocumentManager = Depends(get_document_manager)
 ):
     """Alternative search endpoint"""
-    request = QueryRequest(query=query, k=k)
+    request = QueryRequest(query=query, k=k, generate_answer=generate_answer)
     return await hackrx_run(request, dm)
 
 @app.get("/stats")
